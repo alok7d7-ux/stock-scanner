@@ -67,33 +67,35 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     return (tp * v).cumsum() / v.cumsum()
 
 # ==========================================
-# 2. NSE 200 TICKER LOADER
+# 2. NSE F&O TICKER LOADER
 # ==========================================
 
-def get_nse200_tickers() -> list:
-    """Fetches the NIFTY 200 stock list dynamically or falls back to major constituents."""
-    url = "https://archives.nseindia.com/content/indices/ind_nifty200list.csv"
+def get_nifty_fno_tickers() -> list:
+    """Fetches official NSE F&O stock list or falls back to major derivatives watchlist."""
+    url = "https://archives.nseindia.com/content/fo/fo_mktlots.csv"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         req = urllib.request.Request(url, headers=headers)
-        df_nse = pd.read_csv(urllib.request.urlopen(req))
-        symbols = [f"{sym}.NS" for sym in df_nse['Symbol'].dropna().unique()]
-        print(f"Loaded {len(symbols)} tickers from official NIFTY 200 CSV.")
+        df_fno = pd.read_csv(urllib.request.urlopen(req))
+        # Filter out index symbols (NIFTY, BANKNIFTY, etc.)
+        symbols = [f"{sym.strip()}.NS" for sym in df_fno['UNDERLYING'].dropna().unique() if sym.strip() not in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY']]
+        print(f"Loaded {len(symbols)} F&O stock tickers from NSE.")
         return symbols
     except Exception as e:
-        print(f"Could not download live NSE 200 CSV ({e}). Falling back to primary NSE watchlist...")
+        print(f"Could not fetch dynamic F&O list ({e}). Using primary F&O fallback watchlist...")
         fallback = [
             "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "BHARTIARTL.NS",
             "INFY.NS", "ITC.NS", "SBIN.NS", "LTIM.NS", "LT.NS", "HINDUNILVR.NS",
             "AXISBANK.NS", "KOTAKBANK.NS", "HCLTECH.NS", "ADANIENT.NS", "SUNPHARMA.NS",
             "TATAMOTORS.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "TITAN.NS",
             "ULTRACEMCO.NS", "BAJFINANCE.NS", "M&M.NS", "MARUTI.NS", "TATASTEEL.NS",
-            "COALINDIA.NS", "JSWSTEEL.NS", "ASIANPAINT.NS", "ADANIPORTS.NS", "BAJAJFINSV.NS"
+            "COALINDIA.NS", "JSWSTEEL.NS", "ASIANPAINT.NS", "ADANIPORTS.NS", "BAJAJFINSV.NS",
+            "DIVISLAB.NS", "HEROMOTOCO.NS", "EICHERMOT.NS", "DRREDDY.NS", "CIPLA.NS", "MCX.NS"
         ]
         return fallback
 
 # ==========================================
-# 3. SCANNING LOGIC FOR INDIVIDUAL TICKER
+# 3. SCANNING & COC CALCULATION LOGIC
 # ==========================================
 
 def scan_symbol(symbol: str) -> dict:
@@ -106,43 +108,56 @@ def scan_symbol(symbol: str) -> dict:
     raw_symbol = symbol.replace(".NS", "")
     tv_link = f"https://www.tradingview.com/chart/?symbol=NSE:{raw_symbol}"
     
-    # Dual Supertrend
+    # 1. Technical Indicators
     _, st1_dir = calculate_supertrend(df, period=10, multiplier=2.0)
     _, st2_dir = calculate_supertrend(df, period=21, multiplier=1.0)
     dual_st_bullish = (st1_dir.iloc[-1] == -1) and (st2_dir.iloc[-1] == -1)
     dual_st_bearish = (st1_dir.iloc[-1] == 1) and (st2_dir.iloc[-1] == 1)
     
-    # NTO Indicator
     nto = calculate_nto(df, length=14)
     nto_bullish = nto.iloc[-1] > 80.0
     nto_bearish = nto.iloc[-1] < -80.0
     
-    # Market Structure Breakouts
     highest_high = df['High'].iloc[-10:-1].max()
     lowest_low = df['Low'].iloc[-10:-1].min()
     mss_bullish = df['Close'].iloc[-1] > highest_high
     mss_bearish = df['Close'].iloc[-1] < lowest_low
     
-    # VWAP & Volume Spike
     vwap = calculate_vwap(df)
     vol_sma = df['Volume'].rolling(window=20).mean()
     above_vwap = df['Close'].iloc[-1] > vwap.iloc[-1]
     vol_spike = df['Volume'].iloc[-1] > vol_sma.iloc[-1]
     
-    # Scoring Engine
+    # 2. Cost of Carry (CoC) Proxy Calculation
+    # Compares current Close vs 5-day SMA representing price premium expansion/shrinkage
+    price_sma5 = df['Close'].rolling(window=5).mean().iloc[-1]
+    coc_pct = ((df['Close'].iloc[-1] - price_sma5) / price_sma5) * 100
+    
+    if coc_pct > 0.1:
+        coc_status = "POSITIVE (Expand)"
+        coc_score = 2
+    elif coc_pct < -0.1:
+        coc_status = "NEGATIVE (Shrink)"
+        coc_score = -2
+    else:
+        coc_status = "FLAT / NEUTRAL"
+        coc_score = 0
+        
+    # 3. Multi-Factor Scoring Engine
     score = 0
     score += 2 if above_vwap else -2
     score += 2 if dual_st_bullish else (-2 if dual_st_bearish else 0)
     score += 2 if nto_bullish else (-2 if nto_bearish else 0)
     score += 2 if mss_bullish else (-2 if mss_bearish else 0)
     score += (1 if df['Close'].iloc[-1] >= df['Open'].iloc[-1] else -1) if vol_spike else 0
+    score += coc_score  # Incorporate CoC weight into total score
     
     # Signal Assignment
-    if score >= 4:
+    if score >= 5:
         action = "STRONG BUY"
     elif score >= 2:
         action = "BUY"
-    elif score <= -4:
+    elif score <= -5:
         action = "STRONG SELL"
     elif score <= -2:
         action = "SELL"
@@ -154,7 +169,8 @@ def scan_symbol(symbol: str) -> dict:
         "Close": round(df['Close'].iloc[-1], 2),
         "Action": action,
         "Score": score,
-        "Dual ST": "BULL" if dual_st_bullish else ("BEAR" if dual_st_bearish else "MIXED"),
+        "CoC": coc_status,
+        "CoC_Val": round(coc_pct, 2),
         "TV_Link": tv_link
     }
 
@@ -163,10 +179,10 @@ def scan_symbol(symbol: str) -> dict:
 # ==========================================
 
 if __name__ == "__main__":
-    watchlist = get_nse200_tickers()
+    watchlist = get_nifty_fno_tickers()
     
     results = []
-    print(f"Scanning {len(watchlist)} NSE stocks... Please wait.\n")
+    print(f"Scanning {len(watchlist)} NSE F&O stocks... Please wait.\n")
     
     for i, sym in enumerate(watchlist, 1):
         try:
@@ -182,18 +198,18 @@ if __name__ == "__main__":
     buy_signals = df_results[df_results['Action'].isin(["STRONG BUY", "BUY"])].sort_values(by="Score", ascending=False)
     sell_signals = df_results[df_results['Action'].isin(["STRONG SELL", "SELL"])].sort_values(by="Score", ascending=True)
     
-    print("\n\n================ TOP BULLISH STOCKS (BUY) ================")
+    print("\n\n================ TOP BULLISH F&O STOCKS (BUY) ================")
     if not buy_signals.empty:
         for _, row in buy_signals.iterrows():
-            print(f"• {row['Symbol']} | Close: ₹{row['Close']} | Score: {row['Score']} | Action: {row['Action']}")
+            print(f"• {row['Symbol']} | Close: ₹{row['Close']} | Score: {row['Score']} | CoC: {row['CoC']} ({row['CoC_Val']}%) | Action: {row['Action']}")
             print(f"  Chart Link: {row['TV_Link']}\n")
     else:
-        print("No Strong Buy signals today.")
+        print("No Strong Buy signals in F&O stocks today.")
     
-    print("================ TOP BEARISH STOCKS (SELL) ================")
+    print("================ TOP BEARISH F&O STOCKS (SELL) ================")
     if not sell_signals.empty:
         for _, row in sell_signals.iterrows():
-            print(f"• {row['Symbol']} | Close: ₹{row['Close']} | Score: {row['Score']} | Action: {row['Action']}")
+            print(f"• {row['Symbol']} | Close: ₹{row['Close']} | Score: {row['Score']} | CoC: {row['CoC']} ({row['CoC_Val']}%) | Action: {row['Action']}")
             print(f"  Chart Link: {row['TV_Link']}\n")
     else:
-        print("No Strong Sell signals today.")
+        print("No Strong Sell signals in F&O stocks today.")
