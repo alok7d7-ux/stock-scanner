@@ -1,0 +1,27 @@
+name: Run Stock Scanners
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 10 * * 1-5'
+
+jobs:
+  run-scanners:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas numpy
+
+      - name: Run Master Trend Scanner
+        run: python scanner.py
+
+      - name: Run 20-Day High/Low F&O Options Scanner
+        run: python fno_breakout_scanner.py
