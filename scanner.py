@@ -70,7 +70,7 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
 # ==========================================
 
 def get_nifty_fno_tickers() -> list:
-    """Returns complete list of active NSE F&O stocks formatted for yfinance."""
+    """Returns the complete list of active NSE F&O stocks formatted for yfinance."""
     fno_list = [
         "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT",
         "ADANIPORTS", "ALKEM", "AMBUJACEMENT", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY",
