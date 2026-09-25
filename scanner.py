@@ -1,3 +1,4 @@
+import urllib.request
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -73,9 +74,7 @@ def get_nse200_tickers() -> list:
     """Fetches the NIFTY 200 stock list dynamically or falls back to major constituents."""
     url = "https://archives.nseindia.com/content/indices/ind_nifty200list.csv"
     try:
-        # NSE blocks basic Python user agents, so we pass browser headers
         headers = {'User-Agent': 'Mozilla/5.0'}
-        import urllib.request
         req = urllib.request.Request(url, headers=headers)
         df_nse = pd.read_csv(urllib.request.urlopen(req))
         symbols = [f"{sym}.NS" for sym in df_nse['Symbol'].dropna().unique()]
@@ -83,18 +82,13 @@ def get_nse200_tickers() -> list:
         return symbols
     except Exception as e:
         print(f"Could not download live NSE 200 CSV ({e}). Falling back to primary NSE watchlist...")
-        # Fallback list of major NIFTY 200 constituents
         fallback = [
             "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "BHARTIARTL.NS",
             "INFY.NS", "ITC.NS", "SBIN.NS", "LTIM.NS", "LT.NS", "HINDUNILVR.NS",
             "AXISBANK.NS", "KOTAKBANK.NS", "HCLTECH.NS", "ADANIENT.NS", "SUNPHARMA.NS",
             "TATAMOTORS.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "TITAN.NS",
             "ULTRACEMCO.NS", "BAJFINANCE.NS", "M&M.NS", "MARUTI.NS", "TATASTEEL.NS",
-            "COALINDIA.NS", "JSWSTEEL.NS", "ASIANPAINT.NS", "ADANIPORTS.NS", "BAJAJFINSV.NS",
-            "GRASIM.NS", "BPCL.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS", "DRREDDY.NS",
-            "EICHERMOT.NS", "CIPLA.NS", "SBILIFE.NS", "DIVISLAB.NS", "BRITANNIA.NS",
-            "TATACONSUM.NS", "APOLLOHOSP.NS", "INDUSINDBK.NS", "WIPRO.NS", "BAJAJ-AUTO.NS",
-            "NESTLEIND.NS", "HINDALCO.NS", "BEL.NS", "HAL.NS", "TRENT.NS", "ZOMATO.NS"
+            "COALINDIA.NS", "JSWSTEEL.NS", "ASIANPAINT.NS", "ADANIPORTS.NS", "BAJAJFINSV.NS"
         ]
         return fallback
 
@@ -108,6 +102,10 @@ def scan_symbol(symbol: str) -> dict:
     
     if df.empty or len(df) < 21:
         return None
+    
+    # Clean symbol for TradingView URL
+    raw_symbol = symbol.replace(".NS", "")
+    tv_link = f"https://www.tradingview.com/chart/?symbol=NSE:{raw_symbol}"
     
     # Dual Supertrend Calculations
     _, st1_dir = calculate_supertrend(df, period=10, multiplier=2.0)
@@ -153,14 +151,11 @@ def scan_symbol(symbol: str) -> dict:
         action = "WAIT / NEUTRAL"
         
     return {
-        "Symbol": symbol.replace(".NS", ""),
+        "Symbol": raw_symbol,
         "Close": round(df['Close'].iloc[-1], 2),
         "Action": action,
         "Score": score,
-        "Dual ST": "BULL" if dual_st_bullish else ("BEAR" if dual_st_bearish else "MIXED"),
-        "NTO (>80)": nto_bullish,
-        "Above VWAP": above_vwap,
-        "Vol Spike": vol_spike
+        "TradingView Link": tv_link
     }
 
 # ==========================================
@@ -179,17 +174,24 @@ if __name__ == "__main__":
             if res:
                 results.append(res)
             print(f"[{i}/{len(watchlist)}] Processed: {sym}", end="\r")
-        except Exception as e:
+        except Exception:
             continue
             
     df_results = pd.DataFrame(results)
     
-    # Filter for actionable signals
     buy_signals = df_results[df_results['Action'].isin(["STRONG BUY", "BUY"])].sort_values(by="Score", ascending=False)
     sell_signals = df_results[df_results['Action'].isin(["STRONG SELL", "SELL"])].sort_values(by="Score", ascending=True)
     
     print("\n\n================ TOP BULLISH STOCKS (BUY) ================")
-    print(buy_signals.to_string(index=False) if not buy_signals.empty else "No Strong Buy signals today.")
+    if not buy_signals.empty:
+        for _, row in buy_signals.iterrows():
+            print(f"• {row['Symbol']} | Close: ₹{row['Close']} | Score: {row['Score']} | Action: {row['Action']}\n  Link: {row['TradingView Link']}\n")
+    else:
+        print("No Strong Buy signals today.")
     
-    print("\n================ TOP BEARISH STOCKS (SELL) ================")
-    print(sell_signals.to_string(index=False) if not sell_signals.empty else "No Strong Sell signals today.")
+    print("================ TOP BEARISH STOCKS (SELL) ================")
+    if not sell_signals.empty:
+        for _, row in sell_signals.iterrows():
+            print(f"• {row['Symbol']} | Close: ₹{row['Close']} | Score: {row['Score']} | Action: {row['Action']}\n  Link: {row['TradingView Link']}\n")
+    else:
+        print("No Strong Sell signals today.")
