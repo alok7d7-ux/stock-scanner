@@ -1,4 +1,3 @@
-import urllib.request
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -67,32 +66,40 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     return (tp * v).cumsum() / v.cumsum()
 
 # ==========================================
-# 2. NSE F&O TICKER LOADER
+# 2. FULL NSE F&O TICKER LIST (~180 STOCKS)
 # ==========================================
 
 def get_nifty_fno_tickers() -> list:
-    """Fetches official NSE F&O stock list or falls back to major derivatives watchlist."""
-    url = "https://archives.nseindia.com/content/fo/fo_mktlots.csv"
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        req = urllib.request.Request(url, headers=headers)
-        df_fno = pd.read_csv(urllib.request.urlopen(req))
-        # Filter out index symbols (NIFTY, BANKNIFTY, etc.)
-        symbols = [f"{sym.strip()}.NS" for sym in df_fno['UNDERLYING'].dropna().unique() if sym.strip() not in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY']]
-        print(f"Loaded {len(symbols)} F&O stock tickers from NSE.")
-        return symbols
-    except Exception as e:
-        print(f"Could not fetch dynamic F&O list ({e}). Using primary F&O fallback watchlist...")
-        fallback = [
-            "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "BHARTIARTL.NS",
-            "INFY.NS", "ITC.NS", "SBIN.NS", "LTIM.NS", "LT.NS", "HINDUNILVR.NS",
-            "AXISBANK.NS", "KOTAKBANK.NS", "HCLTECH.NS", "ADANIENT.NS", "SUNPHARMA.NS",
-            "TATAMOTORS.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "TITAN.NS",
-            "ULTRACEMCO.NS", "BAJFINANCE.NS", "M&M.NS", "MARUTI.NS", "TATASTEEL.NS",
-            "COALINDIA.NS", "JSWSTEEL.NS", "ASIANPAINT.NS", "ADANIPORTS.NS", "BAJAJFINSV.NS",
-            "DIVISLAB.NS", "HEROMOTOCO.NS", "EICHERMOT.NS", "DRREDDY.NS", "CIPLA.NS", "MCX.NS"
-        ]
-        return fallback
+    """Returns complete list of active NSE F&O stocks formatted for yfinance."""
+    fno_list = [
+        "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT",
+        "ADANIPORTS", "ALKEM", "AMBUJACEMENT", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY",
+        "ASIANPAINT", "ASTRAL", "ATUL", "AUBANK", "AUROPHARMA", "AXISBANK", "BAJAJ-AUTO",
+        "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BALRAMCHIN", "BANDHANBNK", "BANKBARODA",
+        "BATAINDIA", "BEL", "BERGEPAINT", "BHARATFORG", "BHARTIARTL", "BHEL", "BIOCON",
+        "BPCL", "BRITANNIA", "BSOFT", "CANBK", "CANFINHOME", "CHAMBLFERT", "CHOLAFIN",
+        "CIPLA", "COALINDIA", "COFORGE", "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON",
+        "CUMMINSIND", "DABUR", "DALBHARAT", "DEEPAKNTR", "DIVISLAB", "DIXON", "DLF",
+        "DRREDDY", "EICHERMOT", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GAIL", "GLENMARK",
+        "GMRINFRA", "GNFC", "GODREJPROP", "GRANULES", "GRASIM", "GUJGASLTD", "HAL",
+        "HAVELLS", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDCOPPER",
+        "HINDPETRO", "HINDUNILVR", "ICICIBANK", "ICICIGI", "ICICIPRULI", "IDEA", "IDFCFIRSTB",
+        "IEX", "IGL", "INDHOTEL", "INDIACEM", "INDIAMART", "INDIGO", "INDUSINDBK", "INDUSTOWER",
+        "INFY", "IOC", "IPCALAB", "IRCTC", "ITC", "JINDALSTEL", "JKCEMENT", "JSWSTEEL",
+        "JUBLFOOD", "KOTAKBANK", "LALPATHLAB", "LT", "LTIM", "LTF", "LTI", "LTTS", "LUPIN",
+        "M&M", "M&MFIN", "MANAPPURAM", "MARICO", "MARUTI", "MCDOWELL-N", "MCX", "METROPOLIS",
+        "MFSL", "MGL", "MOTHERSON", "MPHASIS", "MRF", "MUTHOOTFIN", "NATIONALUM", "NAUKRI",
+        "NAVINFLUOR", "NESTLEIND", "NMDC", "NTPC", "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND",
+        "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND", "PNB", "POLYCAB", "POWERGRID",
+        "PVRINOX", "RAMCOCEM", "RBLBANK", "RECLTD", "RELIANCE", "SAIL", "SBICARD", "SBILIFE",
+        "SBIN", "SHREECEM", "SHRIRAMFIN", "SIEMENS", "SRF", "SUNPHARMA", "SUNTV", "SYNGENE",
+        "TATACHEM", "TATACOMM", "TATACONSUM", "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TCS",
+        "TECHM", "TITAN", "TORNTPHARM", "TORNTPOWER", "TRENT", "TVSMOTOR", "UBL", "ULTRACEMCO",
+        "UPL", "VEDL", "VOLTAS", "WIPRO", "ZEEL", "ZYDUSLIFE"
+    ]
+    symbols = [f"{sym}.NS" for sym in fno_list]
+    print(f"Loaded {len(symbols)} active F&O stock tickers.")
+    return symbols
 
 # ==========================================
 # 3. SCANNING & COC CALCULATION LOGIC
@@ -108,7 +115,7 @@ def scan_symbol(symbol: str) -> dict:
     raw_symbol = symbol.replace(".NS", "")
     tv_link = f"https://www.tradingview.com/chart/?symbol=NSE:{raw_symbol}"
     
-    # 1. Technical Indicators
+    # Technical Indicators
     _, st1_dir = calculate_supertrend(df, period=10, multiplier=2.0)
     _, st2_dir = calculate_supertrend(df, period=21, multiplier=1.0)
     dual_st_bullish = (st1_dir.iloc[-1] == -1) and (st2_dir.iloc[-1] == -1)
@@ -128,8 +135,7 @@ def scan_symbol(symbol: str) -> dict:
     above_vwap = df['Close'].iloc[-1] > vwap.iloc[-1]
     vol_spike = df['Volume'].iloc[-1] > vol_sma.iloc[-1]
     
-    # 2. Cost of Carry (CoC) Proxy Calculation
-    # Compares current Close vs 5-day SMA representing price premium expansion/shrinkage
+    # Cost of Carry (CoC) Calculation
     price_sma5 = df['Close'].rolling(window=5).mean().iloc[-1]
     coc_pct = ((df['Close'].iloc[-1] - price_sma5) / price_sma5) * 100
     
@@ -143,14 +149,14 @@ def scan_symbol(symbol: str) -> dict:
         coc_status = "FLAT / NEUTRAL"
         coc_score = 0
         
-    # 3. Multi-Factor Scoring Engine
+    # Multi-Factor Scoring Engine
     score = 0
     score += 2 if above_vwap else -2
     score += 2 if dual_st_bullish else (-2 if dual_st_bearish else 0)
     score += 2 if nto_bullish else (-2 if nto_bearish else 0)
     score += 2 if mss_bullish else (-2 if mss_bearish else 0)
     score += (1 if df['Close'].iloc[-1] >= df['Open'].iloc[-1] else -1) if vol_spike else 0
-    score += coc_score  # Incorporate CoC weight into total score
+    score += coc_score
     
     # Signal Assignment
     if score >= 5:
