@@ -66,15 +66,48 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     return (tp * v).cumsum() / v.cumsum()
 
 # ==========================================
-# 2. SCANNER LOGIC
+# 2. NSE 200 TICKER LOADER
+# ==========================================
+
+def get_nse200_tickers() -> list:
+    """Fetches the NIFTY 200 stock list dynamically or falls back to major constituents."""
+    url = "https://archives.nseindia.com/content/indices/ind_nifty200list.csv"
+    try:
+        # NSE blocks basic Python user agents, so we pass browser headers
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        import urllib.request
+        req = urllib.request.Request(url, headers=headers)
+        df_nse = pd.read_csv(urllib.request.urlopen(req))
+        symbols = [f"{sym}.NS" for sym in df_nse['Symbol'].dropna().unique()]
+        print(f"Loaded {len(symbols)} tickers from official NIFTY 200 CSV.")
+        return symbols
+    except Exception as e:
+        print(f"Could not download live NSE 200 CSV ({e}). Falling back to primary NSE watchlist...")
+        # Fallback list of major NIFTY 200 constituents
+        fallback = [
+            "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "BHARTIARTL.NS",
+            "INFY.NS", "ITC.NS", "SBIN.NS", "LTIM.NS", "LT.NS", "HINDUNILVR.NS",
+            "AXISBANK.NS", "KOTAKBANK.NS", "HCLTECH.NS", "ADANIENT.NS", "SUNPHARMA.NS",
+            "TATAMOTORS.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "TITAN.NS",
+            "ULTRACEMCO.NS", "BAJFINANCE.NS", "M&M.NS", "MARUTI.NS", "TATASTEEL.NS",
+            "COALINDIA.NS", "JSWSTEEL.NS", "ASIANPAINT.NS", "ADANIPORTS.NS", "BAJAJFINSV.NS",
+            "GRASIM.NS", "BPCL.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS", "DRREDDY.NS",
+            "EICHERMOT.NS", "CIPLA.NS", "SBILIFE.NS", "DIVISLAB.NS", "BRITANNIA.NS",
+            "TATACONSUM.NS", "APOLLOHOSP.NS", "INDUSINDBK.NS", "WIPRO.NS", "BAJAJ-AUTO.NS",
+            "NESTLEIND.NS", "HINDALCO.NS", "BEL.NS", "HAL.NS", "TRENT.NS", "ZOMATO.NS"
+        ]
+        return fallback
+
+# ==========================================
+# 3. SCANNING LOGIC FOR INDIVIDUAL TICKER
 # ==========================================
 
 def scan_symbol(symbol: str) -> dict:
     ticker = yf.Ticker(symbol)
-    df = ticker.history(period="1mo", interval="1d")
+    df = ticker.history(period="2mo", interval="1d")
     
     if df.empty or len(df) < 21:
-        return {"Symbol": symbol, "Status": "Insufficient Data"}
+        return None
     
     # Dual Supertrend Calculations
     _, st1_dir = calculate_supertrend(df, period=10, multiplier=2.0)
@@ -120,7 +153,7 @@ def scan_symbol(symbol: str) -> dict:
         action = "WAIT / NEUTRAL"
         
     return {
-        "Symbol": symbol,
+        "Symbol": symbol.replace(".NS", ""),
         "Close": round(df['Close'].iloc[-1], 2),
         "Action": action,
         "Score": score,
@@ -131,24 +164,32 @@ def scan_symbol(symbol: str) -> dict:
     }
 
 # ==========================================
-# 3. RUNNER
+# 4. RUNNER & BATCH PROCESSOR
 # ==========================================
 
 if __name__ == "__main__":
-    # Add your Indian or Global tickers here (.NS for NSE stocks)
-    watchlist = [
-        "RELIANCE.NS", "INFY.NS", "HDFCBANK.NS", "TCS.NS", "SBIN.NS",
-        "AAPL", "MSFT", "NVDA", "AMZN", "TSLA"
-    ]
+    watchlist = get_nse200_tickers()
     
     results = []
-    print("Scanning market tickers...")
-    for sym in watchlist:
+    print(f"Scanning {len(watchlist)} NSE stocks... Please wait.\n")
+    
+    for i, sym in enumerate(watchlist, 1):
         try:
-            results.append(scan_symbol(sym))
+            res = scan_symbol(sym)
+            if res:
+                results.append(res)
+            print(f"[{i}/{len(watchlist)}] Processed: {sym}", end="\r")
         except Exception as e:
-            print(f"Error processing {sym}: {e}")
+            continue
             
     df_results = pd.DataFrame(results)
-    print("\n================ SCANNER RESULTS ================")
-    print(df_results.to_string(index=False))
+    
+    # Filter for actionable signals
+    buy_signals = df_results[df_results['Action'].isin(["STRONG BUY", "BUY"])].sort_values(by="Score", ascending=False)
+    sell_signals = df_results[df_results['Action'].isin(["STRONG SELL", "SELL"])].sort_values(by="Score", ascending=True)
+    
+    print("\n\n================ TOP BULLISH STOCKS (BUY) ================")
+    print(buy_signals.to_string(index=False) if not buy_signals.empty else "No Strong Buy signals today.")
+    
+    print("\n================ TOP BEARISH STOCKS (SELL) ================")
+    print(sell_signals.to_string(index=False) if not sell_signals.empty else "No Strong Sell signals today.")
